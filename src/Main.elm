@@ -6,65 +6,177 @@ import Html.Attributes as A
 import Html.Events exposing (onClick)
 
 
-type alias Cell =
-    { value : Maybe String }
+type Cell
+    = Empty
+    | Slider String
 
 
 type alias Board =
     List (List Cell)
 
 
-solvedBoard : Board
-solvedBoard =
-    [ List.map (\i -> { value = Just (toString i) }) (List.range 1 4)
-    , List.map (\i -> { value = Just (toString i) }) (List.range 5 8)
-    , List.map (\i -> { value = Just (toString i) }) (List.range 9 12)
-    , List.map (\i -> { value = Just (toString i) }) (List.range 13 15) ++ [ { value = Nothing } ]
-    ]
+type alias Model =
+    { prevLines : List Line
+    , currentLine : Line
+    , nextLines : List Line
+    }
+
+
+type alias Line =
+    { prevCells : List String
+    , nextCells : List String
+    }
+
+
+modelToBoard : Model -> Board
+modelToBoard model =
+    List.concat
+        [ List.map (lineToBoard False) (List.reverse model.prevLines)
+        , [ lineToBoard True model.currentLine ]
+        , List.map (lineToBoard False) model.nextLines
+        ]
+
+
+lineToBoard : Bool -> Line -> List Cell
+lineToBoard isCurrent line =
+    List.concat
+        [ List.map Slider (List.reverse line.prevCells)
+        , if isCurrent then
+            [ Empty ]
+          else
+            []
+        , List.map Slider line.nextCells
+        ]
+
+
+solvedModel : Model
+solvedModel =
+    let
+        cells f t =
+            List.reverse (List.map toString (List.range f t))
+
+        line f t =
+            { prevCells = cells f (t - 1)
+            , nextCells = [ toString t ]
+            }
+
+        prevLs =
+            [ line 9 12
+            , line 5 8
+            , line 1 4
+            ]
+
+        prevCs =
+            cells 13 15
+
+        curL =
+            { prevCells = prevCs
+            , nextCells = []
+            }
+    in
+        { prevLines = prevLs
+        , currentLine = curL
+        , nextLines = []
+        }
 
 
 main =
     beginnerProgram
-        { model = solvedBoard
-        , view = boardView
+        { model = solvedModel
+        , view = modelView
         , update = update
         }
 
 
-boardView : Board -> Html Msg
-boardView board =
+modelView : Model -> Html Msg
+modelView =
+    linesView
+
+
+linesView : Model -> Html Msg
+linesView model =
     H.div []
-        (List.map rowView board)
+        (List.concat
+            [ case model.prevLines of
+                [] ->
+                    []
+
+                pl :: pls ->
+                    List.reverse (lineView True False False pl :: List.map (lineView False False False) pls)
+            , [ lineView False False True model.currentLine ]
+            , case model.nextLines of
+                [] ->
+                    []
+
+                sl :: sls ->
+                    lineView False True False sl :: List.map (lineView False False False) sls
+            ]
+        )
 
 
-rowView : List Cell -> Html Msg
-rowView cells =
-    H.div [ A.style [ ( "clear", "both" ) ] ]
-        (List.map cellView cells)
+lineView : Bool -> Bool -> Bool -> Line -> Html Msg
+lineView isUp isDown isCurrent line =
+    let
+        prevOp =
+            if isCurrent then
+                Just SlideLeft
+            else
+                Nothing
+
+        nextOp =
+            if isCurrent then
+                Just SlideRight
+            else if isUp then
+                Just SlideUp
+            else if isDown then
+                Just SlideDown
+            else
+                Nothing
+    in
+        H.div [ A.style [ ( "clear", "both" ) ] ]
+            (List.concat
+                [ case line.prevCells of
+                    [] ->
+                        []
+
+                    p :: ps ->
+                        List.reverse (cellView prevOp (Slider p) :: List.map (Slider >> cellView Nothing) ps)
+                , if isCurrent then
+                    [ cellView Nothing Empty ]
+                  else
+                    []
+                , case line.nextCells of
+                    [] ->
+                        []
+
+                    s :: ss ->
+                        cellView nextOp (Slider s) :: List.map (Slider >> cellView Nothing) ss
+                ]
+            )
 
 
-cellView : Cell -> Html Msg
-cellView cell =
-    case cell.value of
-        Nothing ->
-            H.div [ cellStyle False ] []
+cellView : Maybe Msg -> Cell -> Html Msg
+cellView msg cell =
+    case cell of
+        Empty ->
+            H.div (cellStyle False Nothing) []
 
-        Just value ->
-            H.div [ cellStyle True ]
+        Slider value ->
+            H.div (cellStyle True msg)
                 [ H.text value ]
 
 
-cellStyle : Bool -> Attribute Msg
-cellStyle isSlider =
+cellStyle : Bool -> Maybe Msg -> List (Attribute Msg)
+cellStyle isSlider msg =
     if isSlider then
-        sliderStyle
+        sliderStyle msg
     else
-        holeStyle
+        [ holeStyle ]
 
 
-sliderStyle : Attribute Msg
-sliderStyle =
-    A.style
+sliderStyle : Maybe Msg -> List (Attribute Msg)
+sliderStyle msg =
+    (A.style
         [ ( "backgroundColor", "slateblue" )
         , ( "height", "90px" )
         , ( "width", "90px" )
@@ -76,6 +188,15 @@ sliderStyle =
         , ( "font-size", "2em" )
         , ( "float", "left" )
         ]
+    )
+        :: case msg of
+            Just act ->
+                [ onClick act
+                , A.style [ ( "cursor", "move" ) ]
+                ]
+
+            Nothing ->
+                []
 
 
 holeStyle : Attribute Msg
@@ -91,9 +212,16 @@ holeStyle =
 
 type Msg
     = NoOp
+    | SlideLeft
+    | SlideRight
+    | SlideUp
+    | SlideDown
 
 
 update msg model =
     case msg of
         NoOp ->
             model
+
+        _ ->
+            Debug.log (toString msg) model
